@@ -701,6 +701,7 @@ function appendMsg(t, r, img, anim){
     const b = document.getElementById('chat-display');
     const msgId = 'msg-' + Date.now() + Math.random().toString(36).substr(2,5);
     
+    // 🛑 IMPORTANTE: NÃO REMOVER ESTA LÓGICA DE DRIVE/SKETCHWARE
     let cleanImgUrl = "";
     if (img) cleanImgUrl = fixDriveLink(img);
 
@@ -1182,6 +1183,7 @@ function sendMessage(txtOverride){
   }).processUserInput(safeTxt, state.chatId, filesPayload, state.region, null, 0, state.security.incognito, state.deviceId, state.language, state.userEmail);
 }
 
+// 🛑 IMPORTANTE: Esta função é crítica para o Sketchware/Drive
 function fixDriveLink(url) {
     if (!url) return "";
     if (url.includes('pollinations.ai')) return url;
@@ -1376,6 +1378,7 @@ async function forceDownload(url, btnElement) {
             setTimeout(() => { btnElement.innerHTML = originalContent; btnElement.style.pointerEvents = 'auto'; }, 2000);
         }
     } 
+}
 
 function openFullImage(url){state.currentImgUrl=url;document.getElementById('img-full-view').src=url;document.getElementById('img-overlay').style.display='flex';}
 function closeImgOverlay(){document.getElementById('img-overlay').style.display='none';}
@@ -1454,24 +1457,43 @@ function manualLogin() {
     onLoginSuccess(user); 
 }
 
+// 💎 MODIFICAÇÃO PRINCIPAL AQUI: Sincronização em Background
+// O problema anterior era que ele só lia o localStorage.
+// Agora, ele lê o localStorage (para ser rápido) MAS dispara uma verificação silenciosa na Planilha.
 function onLoginSuccess(u){ 
     state.userEmail = u.email; 
-    localStorage.setItem('njila_user_session', JSON.stringify(u)); 
+    
+    // 1. Renderização Rápida (Usa cache/localStorage) para não ter tela branca
     let name = u.displayName || "Visitante"; 
     if(name === "Visitante" && u.email.includes('@')) { name = u.email.split('@')[0]; } 
     name = name.charAt(0).toUpperCase() + name.slice(1); 
+    
     document.getElementById('gm-welcome').innerText = "Olá, " + name; 
     document.getElementById('header-avatar').innerText = name.charAt(0).toUpperCase(); 
     document.getElementById('big-avatar-letter').innerText = name.charAt(0).toUpperCase();
 
-    const plan = u.plan || 'FREE';
-    const badgeEl = document.querySelector('.gm-badge');
-    if(badgeEl) {
-        badgeEl.innerText = plan;
-        if(plan === 'PRO') { badgeEl.style.color = '#4285F4'; badgeEl.style.borderColor = '#4285F4'; badgeEl.style.backgroundColor = 'rgba(66, 133, 244, 0.1)'; } 
-        else if (plan === 'ULTRA') { badgeEl.style.color = '#E0B0FF'; badgeEl.style.borderColor = '#A020F0'; badgeEl.style.backgroundColor = 'rgba(160, 32, 240, 0.1)'; } 
-        else { badgeEl.style.color = '#999'; badgeEl.style.borderColor = '#555'; badgeEl.style.backgroundColor = 'transparent'; }
+    // Mostra o plano atual do cache imediatamente
+    updateUserBadge(u.plan || 'FREE');
+
+    // 2. SINCRONIZAÇÃO SILENCIOSA COM O SERVIDOR (Rede)
+    // Isso garante que se o plano mudou na planilha, o app vai saber agora.
+    if(u.email) {
+        google.script.run.withSuccessHandler(serverData => {
+            if(serverData && serverData.plan) {
+                // Se o plano no servidor for diferente do local, atualiza!
+                if(serverData.plan !== u.plan) {
+                    u.plan = serverData.plan;
+                    u.msgCount = serverData.msgCount;
+                    localStorage.setItem('njila_user_session', JSON.stringify(u)); // Salva no disco
+                    updateUserBadge(serverData.plan); // Atualiza UI
+                    console.log("Plano sincronizado com servidor: " + serverData.plan);
+                    showToast("Plano atualizado: " + serverData.plan);
+                }
+            }
+        }).syncUserStatus(state.deviceId, u.email);
     }
+
+    // Continua fluxo normal
     const login = document.getElementById('login-screen');
     if(login.style.display !== 'none') {
         login.style.transform = 'translateY(-100%)'; 
